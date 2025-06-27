@@ -1,0 +1,130 @@
+# %%
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from abc import ABC, abstractmethod
+from collections import Counter
+from sklearn.model_selection import train_test_split
+
+# ========== PCA manual ==========
+def pca_reduce(X, n_components=2):
+    X_centered = X - np.mean(X, axis=0)
+    cov = np.cov(X_centered, rowvar=False)
+    eig_vals, eig_vecs = np.linalg.eigh(cov)
+    idx = np.argsort(eig_vals)[::-1]
+    eig_vecs = eig_vecs[:, idx]
+    return X_centered @ eig_vecs[:, :n_components]
+
+# ========== Clase base abstracta ==========
+class KNNBase(ABC):
+    @abstractmethod
+    def fit(self, X, y):
+        pass
+
+    @abstractmethod
+    def distance(self, p1, p2):
+        pass
+
+    @abstractmethod
+    def predict(self, X_new, k=3):
+        pass
+
+# ========== Clase concreta ==========
+class KNNClassifier(KNNBase):
+    def __init__(self):
+        self.__X_train = None
+        self.__y_train = None
+
+    def get_X_train(self):
+        return self.__X_train
+
+    def set_X_train(self, value):
+        self.__X_train = value
+
+    def get_y_train(self):
+        return self.__y_train
+
+    def set_y_train(self, value):
+        self.__y_train = value
+
+    def fit(self, X, y):
+        self.__X_train = X
+        self.__y_train = y
+
+    def distance(self, p1, p2):
+        return np.sqrt(np.sum((p1 - p2) ** 2))
+
+    def predict(self, X_new, k=3):
+        predictions = []
+        for x in X_new:
+            distances = [self.distance(x, train) for train in self.__X_train]
+            k_indices = np.argsort(distances)[:k]
+            k_labels = [self.__y_train[i] for i in k_indices]
+            most_common = Counter(k_labels).most_common(1)[0][0]
+            predictions.append(most_common)
+        return predictions
+
+    def __repr__(self):
+        return f"KNNClassifier with {len(self.__X_train)} training examples"
+
+    def __eq__(self, other):
+        return np.array_equal(self.__X_train, other.__X_train) and np.array_equal(self.__y_train, other.__y_train)
+
+    def __add__(self, other):
+        new_X = np.concatenate((self.__X_train, other.__X_train))
+        new_y = np.concatenate((self.__y_train, other.__y_train))
+        combined = KNNClassifier()
+        combined.fit(new_X, new_y)
+        return combined
+
+    def plot_neighbors(self, x_new, k=3):
+        X_all = np.vstack([self.__X_train, x_new.reshape(1, -1)])
+        X_2d = pca_reduce(X_all)
+        X_train_2d = X_2d[:-1]
+        x_new_2d = X_2d[-1]
+
+        distances = [self.distance(x_new, train) for train in self.__X_train]
+        k_indices = np.argsort(distances)[:k]
+
+        species_set = list(set(self.__y_train))
+        colors = ['red', 'green', 'blue']
+        species_color = {sp: colors[i % len(colors)] for i, sp in enumerate(species_set)}
+
+        for sp in species_set:
+            idx = [i for i, label in enumerate(self.__y_train) if label == sp]
+            plt.scatter(X_train_2d[idx, 0], X_train_2d[idx, 1], label=sp, alpha=0.6, c=species_color[sp])
+
+        for i in k_indices:
+            plt.scatter(X_train_2d[i, 0], X_train_2d[i, 1], s=100, edgecolor='black', facecolor='none', linewidths=2)
+
+        plt.scatter(x_new_2d[0], x_new_2d[1], c='black', marker='X', s=150, label='Nuevo ejemplar')
+
+        plt.title(f'{k} vecinos más cercanos')
+        plt.legend()
+        plt.xlabel("PCA 1")
+        plt.ylabel("PCA 2")
+        plt.grid(True)
+        plt.show()
+
+# ========== Cargar y limpiar datos ==========
+df = pd.read_csv("pinguins.csv")
+df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_").str.replace("(", "").str.replace(")", "")
+df.dropna(inplace=True)
+
+features = ['culmen_length_mm', 'culmen_depth_mm', 'flipper_length_mm', 'body_mass_g']
+X = df[features].values
+y = df['species'].values
+
+# ========== Entrenar ==========
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+clf = KNNClassifier()
+clf.fit(X_train, y_train)
+
+# ========== Predicciones ==========
+for k in [1, 3, 5]:
+    predictions = clf.predict(X_test, k=k)
+    print(f"\nPredicciones con k = {k}:\n", predictions[:10])
+
+# ========== Graficar vecinos de un nuevo ejemplar ==========
+nuevo = X_test[0]
+clf.plot_neighbors(nuevo, k=3)
